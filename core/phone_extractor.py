@@ -66,11 +66,11 @@ def is_valid_phone_candidate(raw: str) -> bool:
 
 def normalize_phone_number(raw_phone: str) -> Optional[str]:
     """
-    Cleans and formats a phone number string into a clean, uniform presentation.
-    Examples:
-    - '+15550101234' -> '+1 (555) 010-1234'
-    - '5550101234'   -> '(555) 010-1234'
-    - '+919876543210'-> '+91 98765 43210'
+    Cleans and formats a phone number string:
+    - 10-digit numbers without country code are displayed normally as clean 10 digits
+      (e.g. '9876543210' or '5550101234'), never formatted as '(XXX) XXX-XXXX'.
+    - Numbers with country code are displayed with their country code
+      (e.g. '+91 9876543210', '+1 5550101234', '+44 2079460958').
     """
     if not raw_phone or not isinstance(raw_phone, str):
         return None
@@ -85,38 +85,43 @@ def normalize_phone_number(raw_phone: str) -> Optional[str]:
     digits = re.sub(r'\D', '', cleaned)
     has_plus = cleaned.startswith('+')
 
-    # 1. US / Canada 10-digit number
+    # 1. 10-digit number without country code -> display normally as plain 10 digits
     if len(digits) == 10 and not has_plus:
-        return f"({digits[:3]}) {digits[3:6]}-{digits[6:]}"
+        return digits
 
-    # 2. US / Canada 11-digit number starting with 1
-    if len(digits) == 11 and digits.startswith('1'):
-        return f"+1 ({digits[1:4]}) {digits[4:7]}-{digits[7:]}"
-
-    # 3. India 12-digit number starting with 91
-    if len(digits) == 12 and digits.startswith('91'):
-        return f"+91 {digits[2:7]} {digits[7:]}"
-
-    # 4. India 11-digit starting with 0
-    if len(digits) == 11 and digits.startswith('0') and digits[1] in '6789':
-        return f"+91 {digits[1:6]} {digits[6:]}"
-
-    # 5. UK 12-digit number starting with 44
-    if len(digits) == 12 and digits.startswith('44'):
-        return f"+44 {digits[2:6]} {digits[6:]}"
-
-    # 6. General international format with '+'
+    # 2. International format with '+'
     if has_plus:
-        # Group gracefully
-        return f"+{digits[:2]} {digits[2:6]} {digits[6:]}".strip()
+        m_delim = re.match(r'\+([1-9]\d{0,2})[\s().-]+', cleaned)
+        if m_delim:
+            cc = m_delim.group(1)
+            rest_digits = re.sub(r'\D', '', cleaned[len(m_delim.group(0)):])
+            if rest_digits:
+                return f"+{cc} {rest_digits}"
+        if len(digits) == 11 and digits.startswith('1'):
+            return f"+1 {digits[1:]}"
+        elif len(digits) == 12 and digits.startswith('91'):
+            return f"+91 {digits[2:]}"
+        elif len(digits) == 12 and digits.startswith('44'):
+            return f"+44 {digits[2:]}"
+        elif len(digits) > 10:
+            cc_len = len(digits) - 10
+            return f"+{digits[:cc_len]} {digits[cc_len:]}"
+        return f"+{digits}"
 
-    # Fallback to readable formatted string
-    if len(digits) == 10:
-        return f"({digits[:3]}) {digits[3:6]}-{digits[6:]}"
-    elif len(digits) > 10:
-        return f"+{digits[:len(digits)-10]} {digits[-10:-7]} {digits[-7:-4]} {digits[-4:]}"
+    # 3. 11-digit US number starting with 1 (without '+')
+    if len(digits) == 11 and digits.startswith('1'):
+        return f"+1 {digits[1:]}"
 
-    return cleaned
+    # 4. 12-digit Indian number starting with 91 (without '+')
+    if len(digits) == 12 and digits.startswith('91'):
+        return f"+91 {digits[2:]}"
+
+    # 5. 11-digit Indian number starting with 0 trunk prefix
+    if len(digits) == 11 and digits.startswith('0') and digits[1] in '6789':
+        return digits[1:]
+
+    # Fallback: return plain digits
+    return digits
 
 
 def extract_phone_numbers_from_text(text: str) -> List[str]:
