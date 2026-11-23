@@ -22,14 +22,14 @@ NORTH_AMERICA_REGEX = re.compile(
     r'(?:\+?1[\s.-]?)?\(?\b[1-9]\d{2}\)?[\s.-]?\d{3}[\s.-]?\d{4}\b'
 )
 
-# Indian mobile format: +91 98765 43210, 09876543210, 9876543210 (starts with 6-9)
+# Indian mobile format: +91 98765 43210, 09876543210, 9876543210, 98765-43210 (starts with 6-9)
 INDIAN_PHONE_REGEX = re.compile(
-    r'(?:(?:\+91|0)[\s.-]?)?[6-9]\d{4}[\s.-]?\d{5}\b'
+    r'(?:\+91[\s.-]?|\b0[\s.-]?|\b)[6-9][\d\s.-]{8,13}\d\b'
 )
 
 # Generic phone with keyword context (e.g. "Tel: 555-0199" or "Mobile: 9876543210")
 KEYWORD_PHONE_REGEX = re.compile(
-    r'(?:phone|tel|telephone|mobile|cell|contact|ph|m|whatsapp)[\s.:#-]+(\+?[\d\s().-]{7,22})',
+    r'(?:phone|tel|telephone|mobile|cell|contact|ph|m|mob|whatsapp|call|p)[\s.:#-]+(\+?[\d\s().-]{7,22})',
     re.IGNORECASE
 )
 
@@ -53,8 +53,8 @@ def is_valid_phone_candidate(raw: str) -> bool:
     if len(set(digits)) == 1:
         return False
 
-    # Check for simple sequential runs (e.g., 1234567890)
-    if digits in "01234567890123456" or digits in "9876543210987654":
+    # Check for obvious ascending dummy run
+    if digits in ("1234567890", "0123456789"):
         return False
 
     # Check if raw string looks like a date range

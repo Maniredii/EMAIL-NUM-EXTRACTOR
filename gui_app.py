@@ -164,6 +164,11 @@ class LightweightExtractorApp:
         )
         self.btn_csv.pack(side=tk.LEFT, padx=(0, 8))
 
+        self.btn_copy_phones = ttk.Button(
+            export_frame, text="📱 Copy Phones", state=tk.DISABLED, command=self._copy_phones
+        )
+        self.btn_copy_phones.pack(side=tk.RIGHT, padx=(4, 0))
+
         self.btn_bcc_outlook = ttk.Button(
             export_frame, text="📋 Copy Outlook BCC (;)", state=tk.DISABLED, command=lambda: self._copy_bcc(";")
         )
@@ -227,6 +232,7 @@ class LightweightExtractorApp:
         self.btn_csv.config(state=tk.DISABLED)
         self.btn_bcc_gmail.config(state=tk.DISABLED)
         self.btn_bcc_outlook.config(state=tk.DISABLED)
+        self.btn_copy_phones.config(state=tk.DISABLED)
 
         self.progress_bar["maximum"] = scan_res["total_files"]
         self.progress_bar["value"] = 0
@@ -311,8 +317,11 @@ class LightweightExtractorApp:
         if emails_count > 0 or phones_count > 0:
             self.btn_excel.config(state=tk.NORMAL)
             self.btn_csv.config(state=tk.NORMAL)
-            self.btn_bcc_gmail.config(state=tk.NORMAL)
-            self.btn_bcc_outlook.config(state=tk.NORMAL)
+            if emails_count > 0:
+                self.btn_bcc_gmail.config(state=tk.NORMAL)
+                self.btn_bcc_outlook.config(state=tk.NORMAL)
+            if phones_count > 0:
+                self.btn_copy_phones.config(state=tk.NORMAL)
 
         self.status_label.config(
             text=f"✅ Done! Extracted {emails_count} unique emails & {phones_count} phone numbers."
@@ -366,12 +375,35 @@ class LightweightExtractorApp:
         )
         if save_path:
             try:
-                csv_bytes = ExportManager.generate_csv_bytes(self.result_data["df_unique_emails"])
+                # Export the full mapping dataframe which contains Filename, Emails, and Phone Numbers
+                df_export = self.result_data.get("df_resume_mapping")
+                if df_export is None or df_export.empty:
+                    df_export = self.result_data.get("df_unique_emails")
+                csv_bytes = ExportManager.generate_csv_bytes(df_export)
                 with open(save_path, "wb") as f:
                     f.write(csv_bytes)
                 messagebox.showinfo("Export Successful", f"CSV file saved successfully to:\n{save_path}")
             except Exception as e:
                 messagebox.showerror("Export Failed", f"Could not save CSV file: {e}")
+
+    def _copy_phones(self):
+        if not self.result_data:
+            return
+        df_phones = self.result_data.get("df_unique_phones")
+        if df_phones is not None and not df_phones.empty and "Phone Number" in df_phones.columns:
+            phones = df_phones["Phone Number"].dropna().tolist()
+        else:
+            phones = []
+
+        if not phones:
+            messagebox.showinfo("No Phone Numbers", "No phone numbers were found to copy.")
+            return
+
+        phones_str = ", ".join(phones)
+        self.root.clipboard_clear()
+        self.root.clipboard_append(phones_str)
+        self.root.update()
+        messagebox.showinfo("Copied to Clipboard", f"Copied {len(phones)} unique phone numbers to clipboard!")
 
     def _copy_bcc(self, separator: str):
         if not self.result_data:
