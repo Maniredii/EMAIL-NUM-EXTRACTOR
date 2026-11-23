@@ -195,7 +195,7 @@ class LightweightExtractorApp:
         export_frame.pack(fill=tk.X, padx=15, pady=(4, 10))
 
         self.btn_excel = ttk.Button(
-            export_frame, text="📊 Save Excel Report (.xlsx)", state=tk.DISABLED, command=self._export_excel
+            export_frame, text="📊 Save Excel Report (.xlsx)...", state=tk.DISABLED, command=self._open_excel_customize_dialog
         )
         self.btn_excel.pack(side=tk.LEFT, padx=(0, 8))
 
@@ -494,14 +494,143 @@ class LightweightExtractorApp:
             self.stop_event.set()
             self.status_label.config(text="Stopping process gracefully...")
 
-    def _export_excel(self):
+    def _open_excel_customize_dialog(self):
         if not self.result_data:
             return
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Customize Excel Export Fields")
+        dialog.geometry("560x610")
+        dialog.minsize(500, 520)
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        # Center dialog relative to main window
+        x = self.root.winfo_x() + (self.root.winfo_width() // 2) - 280
+        y = self.root.winfo_y() + (self.root.winfo_height() // 2) - 305
+        dialog.geometry(f"+{max(0, x)}+{max(0, y)}")
+
+        # Header
+        hdr = ttk.Frame(dialog, padding="16 12 16 6")
+        hdr.pack(fill=tk.X)
+        ttk.Label(hdr, text="⚙️ Customize Excel Report Fields", style="Header.TLabel").pack(anchor=tk.W)
+        ttk.Label(
+            hdr,
+            text="Choose which worksheets and candidate columns you want to include in your Excel file.",
+            style="SubHeader.TLabel"
+        ).pack(anchor=tk.W, pady=(2, 0))
+
+        content = ttk.Frame(dialog, padding="16 6")
+        content.pack(fill=tk.BOTH, expand=True)
+
+        # 1. Worksheets to include
+        sheets_group = ttk.LabelFrame(content, text=" 1. Worksheets to Include ", padding="10")
+        sheets_group.pack(fill=tk.X, pady=(0, 10))
+
+        var_sh_emails = tk.BooleanVar(value=True)
+        var_sh_phones = tk.BooleanVar(value=True)
+        var_sh_mapping = tk.BooleanVar(value=True)
+        var_sh_summary = tk.BooleanVar(value=True)
+        var_sh_failed = tk.BooleanVar(value=True)
+
+        ttk.Checkbutton(sheets_group, text="📧 Unique Emails Sheet (Deduplicated with counts)", variable=var_sh_emails).pack(anchor=tk.W, pady=2)
+        ttk.Checkbutton(sheets_group, text="📱 Unique Phone Numbers Sheet (Deduplicated with counts)", variable=var_sh_phones).pack(anchor=tk.W, pady=2)
+        ttk.Checkbutton(sheets_group, text="📄 Resume & Candidate Mapping Sheet (Detailed audit list)", variable=var_sh_mapping).pack(anchor=tk.W, pady=2)
+        ttk.Checkbutton(sheets_group, text="📊 Summary & Statistics Sheet (Overall extraction metrics)", variable=var_sh_summary).pack(anchor=tk.W, pady=2)
+        ttk.Checkbutton(sheets_group, text="⚠️ Failed / Corrupted Files Sheet", variable=var_sh_failed).pack(anchor=tk.W, pady=2)
+
+        # 2. Columns in Resume Mapping
+        cols_group = ttk.LabelFrame(content, text=" 2. Columns in Resume Mapping Sheet ", padding="10")
+        cols_group.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+
+        mapping_col_vars = {
+            "PDF Filename": tk.BooleanVar(value=True),
+            "Extracted Emails": tk.BooleanVar(value=True),
+            "Extracted Phone Numbers": tk.BooleanVar(value=True),
+            "Email Count": tk.BooleanVar(value=True),
+            "Phone Count": tk.BooleanVar(value=True),
+            "Status": tk.BooleanVar(value=True),
+            "Full File Path": tk.BooleanVar(value=False),  # Unchecked by default for clean presentation
+            "Duration (s)": tk.BooleanVar(value=False),
+            "Method": tk.BooleanVar(value=False),
+            "Error Details": tk.BooleanVar(value=True)
+        }
+
+        col_grid = ttk.Frame(cols_group)
+        col_grid.pack(fill=tk.BOTH, expand=True)
+
+        col_items = list(mapping_col_vars.items())
+        for idx, (col_name, var) in enumerate(col_items):
+            r = idx % 5
+            c = idx // 5
+            ttk.Checkbutton(col_grid, text=col_name, variable=var).grid(row=r, column=c, sticky=tk.W, padx=14, pady=3)
+
+        # Presets Buttons
+        presets_frame = ttk.Frame(content)
+        presets_frame.pack(fill=tk.X, pady=(0, 8))
+        ttk.Label(presets_frame, text="Quick Presets:").pack(side=tk.LEFT, padx=(0, 8))
+
+        def preset_all():
+            for v in [var_sh_emails, var_sh_phones, var_sh_mapping, var_sh_summary, var_sh_failed]:
+                v.set(True)
+            for v in mapping_col_vars.values():
+                v.set(True)
+
+        def preset_contacts_only():
+            var_sh_emails.set(True)
+            var_sh_phones.set(True)
+            var_sh_mapping.set(True)
+            var_sh_summary.set(False)
+            var_sh_failed.set(False)
+            for k, v in mapping_col_vars.items():
+                v.set(k in ["PDF Filename", "Extracted Emails", "Extracted Phone Numbers", "Email Count", "Phone Count", "Status"])
+
+        def preset_default():
+            var_sh_emails.set(True)
+            var_sh_phones.set(True)
+            var_sh_mapping.set(True)
+            var_sh_summary.set(True)
+            var_sh_failed.set(True)
+            for k, v in mapping_col_vars.items():
+                v.set(k not in ["Full File Path", "Duration (s)", "Method"])
+
+        ttk.Button(presets_frame, text="✅ Select All", command=preset_all).pack(side=tk.LEFT, padx=3)
+        ttk.Button(presets_frame, text="📱 Clean Contacts Only", command=preset_contacts_only).pack(side=tk.LEFT, padx=3)
+        ttk.Button(presets_frame, text="🔄 Reset Defaults", command=preset_default).pack(side=tk.LEFT, padx=3)
+
+        # Bottom Action Buttons
+        btn_frame = ttk.Frame(dialog, padding="16 12")
+        btn_frame.pack(fill=tk.X, side=tk.BOTTOM)
+
+        def do_export():
+            selected_cols = [col for col, var in mapping_col_vars.items() if var.get()]
+            if not selected_cols:
+                messagebox.showwarning("No Columns", "Please select at least one column for the Resume Mapping sheet.")
+                return
+
+            config = {
+                "include_unique_emails": var_sh_emails.get(),
+                "include_unique_phones": var_sh_phones.get(),
+                "include_resume_mapping": var_sh_mapping.get(),
+                "include_summary": var_sh_summary.get(),
+                "include_failed_files": var_sh_failed.get(),
+                "mapping_columns": selected_cols
+            }
+            dialog.destroy()
+            self._save_excel_with_config(config)
+
+        ttk.Button(btn_frame, text="Cancel", command=dialog.destroy).pack(side=tk.RIGHT, padx=(8, 0))
+        ttk.Button(btn_frame, text="💾 Save Excel File...", style="Action.TButton", command=do_export).pack(side=tk.RIGHT)
+
+    def _save_excel_with_config(self, config: dict):
+        if not self.result_data:
+            return
+
         save_path = filedialog.asksaveasfilename(
             defaultextension=".xlsx",
             filetypes=[("Excel Workbook", "*.xlsx")],
             initialfile="Resume_Extraction_Report.xlsx",
-            title="Save Excel Report"
+            title="Save Customized Excel Report"
         )
         if save_path:
             try:
@@ -510,12 +639,13 @@ class LightweightExtractorApp:
                     df_mapping=self.result_data["df_resume_mapping"],
                     summary=self.result_data["summary"],
                     resume_results=self.result_data["resume_results"],
-                    df_unique_phones=self.result_data.get("df_unique_phones")
+                    df_unique_phones=self.result_data.get("df_unique_phones"),
+                    config=config
                 )
                 with open(save_path, "wb") as f:
                     f.write(wb_io.getbuffer())
 
-                # Offer to open the folder location immediately!
+                # Offer to open the folder location immediately
                 if messagebox.askyesno(
                     "Export Successful",
                     f"Excel report saved successfully to:\n{save_path}\n\nDo you want to open the file location now?"

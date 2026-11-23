@@ -168,6 +168,36 @@ class TestBatchProcessorAndExport:
                 assert len(df_back_failed) == 1
                 assert df_back_failed.iloc[0]["Filename"] == "resume_corrupt.pdf"
 
+        # 7. Test Customized Excel Report (Selective fields and sheets)
+        custom_cfg = {
+            "include_unique_emails": True,
+            "include_unique_phones": False,
+            "include_resume_mapping": True,
+            "include_summary": False,
+            "include_failed_files": False,
+            "mapping_columns": ["PDF Filename", "Extracted Emails", "Status"]
+        }
+        custom_buf = ExportManager.generate_full_report_workbook(
+            df_unique=df_unique,
+            df_mapping=df_mapping,
+            summary=summary,
+            resume_results=result["resume_results"],
+            df_unique_phones=result["df_unique_phones"],
+            config=custom_cfg
+        )
+        with pd.ExcelFile(custom_buf) as xls_custom:
+            # Only selected sheets must be present
+            assert "Unique Emails" in xls_custom.sheet_names
+            assert "Resume Mapping" in xls_custom.sheet_names
+            assert "Summary" not in xls_custom.sheet_names
+            assert "Unique Phone Numbers" not in xls_custom.sheet_names
+            assert "Failed Files" not in xls_custom.sheet_names
+
+            # Only selected columns in Resume Mapping
+            df_m_custom = pd.read_excel(xls_custom, sheet_name="Resume Mapping")
+            assert list(df_m_custom.columns) == ["PDF Filename", "Extracted Emails", "Status"]
+            assert "Full File Path" not in df_m_custom.columns
+
     def test_cancellation_support(self, sample_batch_dir):
         scan_res = scan_folder(sample_batch_dir, recursive=True, file_types=[".pdf"])
         stop_evt = threading.Event()

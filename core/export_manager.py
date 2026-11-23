@@ -51,58 +51,81 @@ class ExportManager:
         df_mapping: pd.DataFrame,
         summary: Dict[str, Any],
         resume_results: List[Dict[str, Any]],
-        df_unique_phones: Optional[pd.DataFrame] = None
+        df_unique_phones: Optional[pd.DataFrame] = None,
+        config: Optional[Dict[str, Any]] = None
     ) -> io.BytesIO:
         """
-        Creates extraction_report.xlsx with comprehensive sheets:
-        1. Unique Emails
-        2. Unique Phone Numbers (if available)
-        3. Resume Mapping
-        4. Summary
-        5. Failed Files
+        Creates extraction_report.xlsx with customizable sheets and columns:
+        1. Unique Emails (customizable columns)
+        2. Unique Phone Numbers (customizable columns)
+        3. Resume Mapping (customizable columns)
+        4. Summary (optional)
+        5. Failed Files (optional)
         """
+        cfg = config or {}
+        include_emails = cfg.get("include_unique_emails", True)
+        include_phones = cfg.get("include_unique_phones", True)
+        include_mapping = cfg.get("include_resume_mapping", True)
+        include_summary = cfg.get("include_summary", True)
+        include_failed = cfg.get("include_failed_files", True)
+
+        # Fallback: ensure at least one sheet is included so workbook is valid
+        if not any([include_emails, include_phones, include_mapping, include_summary, include_failed]):
+            include_emails = True
+            include_mapping = True
+
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             # Sheet 1: Unique Emails
-            df_unique.to_excel(writer, sheet_name="Unique Emails", index=False)
+            if include_emails:
+                email_cols = cfg.get("email_columns")
+                df_u = df_unique[[c for c in email_cols if c in df_unique.columns]] if email_cols else df_unique
+                df_u.to_excel(writer, sheet_name="Unique Emails", index=False)
 
             # Sheet 2: Unique Phone Numbers
-            if df_unique_phones is not None and not df_unique_phones.empty:
-                df_unique_phones.to_excel(writer, sheet_name="Unique Phone Numbers", index=False)
+            if include_phones and df_unique_phones is not None and not df_unique_phones.empty:
+                phone_cols = cfg.get("phone_columns")
+                df_p = df_unique_phones[[c for c in phone_cols if c in df_unique_phones.columns]] if phone_cols else df_unique_phones
+                df_p.to_excel(writer, sheet_name="Unique Phone Numbers", index=False)
 
             # Sheet 3: Resume Mapping
-            df_mapping.to_excel(writer, sheet_name="Resume Mapping", index=False)
+            if include_mapping:
+                mapping_cols = cfg.get("mapping_columns")
+                df_m = df_mapping[[c for c in mapping_cols if c in df_mapping.columns]] if mapping_cols else df_mapping
+                df_m.to_excel(writer, sheet_name="Resume Mapping", index=False)
 
             # Sheet 4: Summary
-            summary_data = [
-                {"Metric": "Total Resumes Discovered", "Value": summary.get("total_files", 0)},
-                {"Metric": "Total Resumes Processed", "Value": summary.get("processed_count", 0)},
-                {"Metric": "Resumes with Contacts Found", "Value": summary.get("completed_count", 0)},
-                {"Metric": "Resumes with Zero Contacts", "Value": summary.get("no_email_count", 0)},
-                {"Metric": "Failed / Corrupted Files", "Value": summary.get("failed_count", 0)},
-                {"Metric": "Total Unique Emails Extracted", "Value": summary.get("unique_emails_count", 0)},
-                {"Metric": "Total Unique Phone Numbers Extracted", "Value": summary.get("unique_phones_count", 0)},
-                {"Metric": "Total Processing Time (seconds)", "Value": summary.get("total_duration_seconds", 0)},
-                {"Metric": "Process Stopped Early", "Value": "Yes" if summary.get("was_stopped") else "No"}
-            ]
-            df_sum = pd.DataFrame(summary_data)
-            df_sum.to_excel(writer, sheet_name="Summary", index=False)
+            if include_summary:
+                summary_data = [
+                    {"Metric": "Total Resumes Discovered", "Value": summary.get("total_files", 0)},
+                    {"Metric": "Total Resumes Processed", "Value": summary.get("processed_count", 0)},
+                    {"Metric": "Resumes with Contacts Found", "Value": summary.get("completed_count", 0)},
+                    {"Metric": "Resumes with Zero Contacts", "Value": summary.get("no_email_count", 0)},
+                    {"Metric": "Failed / Corrupted Files", "Value": summary.get("failed_count", 0)},
+                    {"Metric": "Total Unique Emails Extracted", "Value": summary.get("unique_emails_count", 0)},
+                    {"Metric": "Total Unique Phone Numbers Extracted", "Value": summary.get("unique_phones_count", 0)},
+                    {"Metric": "Total Processing Time (seconds)", "Value": summary.get("total_duration_seconds", 0)},
+                    {"Metric": "Process Stopped Early", "Value": "Yes" if summary.get("was_stopped") else "No"}
+                ]
+                df_sum = pd.DataFrame(summary_data)
+                df_sum.to_excel(writer, sheet_name="Summary", index=False)
 
             # Sheet 5: Failed Files
-            failed_records = [
-                {
-                    "Filename": r["filename"],
-                    "Path": r["full_path"],
-                    "Extraction Method": r["extraction_method"],
-                    "Error Details": r["error_details"]
-                }
-                for r in resume_results if r.get("status") == "Failed"
-            ]
-            if failed_records:
-                df_failed = pd.DataFrame(failed_records)
-            else:
-                df_failed = pd.DataFrame(columns=["Filename", "Path", "Extraction Method", "Error Details"])
-            df_failed.to_excel(writer, sheet_name="Failed Files", index=False)
+            if include_failed:
+                failed_records = [
+                    {
+                        "Filename": r["filename"],
+                        "Path": r["full_path"],
+                        "Extraction Method": r["extraction_method"],
+                        "Error Details": r["error_details"]
+                    }
+                    for r in resume_results if r.get("status") == "Failed"
+                ]
+                if failed_records:
+                    df_failed = pd.DataFrame(failed_records)
+                else:
+                    df_failed = pd.DataFrame(columns=["Filename", "Path", "Extraction Method", "Error Details"])
+                df_failed.to_excel(writer, sheet_name="Failed Files", index=False)
 
             # Apply styling to all sheets
             for sheetname in writer.book.sheetnames:

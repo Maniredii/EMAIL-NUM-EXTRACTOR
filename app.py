@@ -586,10 +586,40 @@ if st.session_state.extraction_data:
 
     with exp_col2:
         st.markdown("#### 📥 Direct Browser Download")
+
+        with st.expander("⚙️ Customize Excel Report Sheets & Fields"):
+            c_cust1, c_cust2 = st.columns(2)
+            with c_cust1:
+                st.markdown("**Worksheets to Include:**")
+                inc_em_sh = st.checkbox("Unique Emails Sheet", value=True, key="cust_em_sh")
+                inc_ph_sh = st.checkbox("Unique Phones Sheet", value=True, key="cust_ph_sh")
+                inc_map_sh = st.checkbox("Resume Mapping Sheet", value=True, key="cust_map_sh")
+            with c_cust2:
+                inc_sum_sh = st.checkbox("Summary Sheet", value=True, key="cust_sum_sh")
+                inc_fail_sh = st.checkbox("Failed Files Sheet", value=True, key="cust_fail_sh")
+
+            cust_cols = st.multiselect(
+                "Columns to Include in Resume Mapping Sheet:",
+                options=[
+                    "PDF Filename", "Extracted Emails", "Extracted Phone Numbers",
+                    "Email Count", "Phone Count", "Status", "Full File Path", "Duration (s)", "Method"
+                ],
+                default=["PDF Filename", "Extracted Emails", "Extracted Phone Numbers", "Email Count", "Phone Count", "Status"],
+                key="cust_cols_ms"
+            )
+            web_export_config = {
+                "include_unique_emails": inc_em_sh,
+                "include_unique_phones": inc_ph_sh,
+                "include_resume_mapping": inc_map_sh,
+                "include_summary": inc_sum_sh,
+                "include_failed_files": inc_fail_sh,
+                "mapping_columns": cust_cols or ["PDF Filename", "Extracted Emails", "Extracted Phone Numbers", "Status"]
+            }
+
         dl_row1_col1, dl_row1_col2 = st.columns(2)
         with dl_row1_col1:
             report_buffer = ExportManager.generate_full_report_workbook(
-                df_unique, df_mapping, summary, resume_results, df_unique_phones=df_unique_phones
+                df_unique, df_mapping, summary, resume_results, df_unique_phones=df_unique_phones, config=web_export_config
             )
             st.download_button(
                 label="📊 extraction_report.xlsx (Full)",
