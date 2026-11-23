@@ -4,6 +4,7 @@ Designed specifically for older, low-spec laptops (requires < 30 MB RAM, no brow
 """
 import os
 import sys
+import queue
 import threading
 from pathlib import Path
 import tkinter as tk
@@ -30,8 +31,10 @@ class LightweightExtractorApp:
         self.docx_var = tk.BooleanVar(value=True)
 
         self.processor = None
+        self.stop_event = threading.Event()
         self.is_processing = False
         self.result_data = None
+        self.msg_queue = queue.Queue()
 
         self._apply_styles()
         self._build_ui()
@@ -209,9 +212,12 @@ class LightweightExtractorApp:
             self.tree.delete(item)
 
         # Set up processor
+        self.stop_event.clear()
         self.processor = BatchProcessor(
-            files_to_process=scan_res["files"],
-            enable_ocr=False
+            files=scan_res["files"],
+            enable_ocr=False,
+            progress_callback=self._on_progress_callback,
+            stop_event=self.stop_event
         )
 
         self.is_processing = True
@@ -225,35 +231,67 @@ class LightweightExtractorApp:
         self.progress_bar["maximum"] = scan_res["total_files"]
         self.progress_bar["value"] = 0
 
+        # Start queue processing on main thread
+        self.root.after(40, self._process_queue)
+
         # Run extraction in worker thread
         threading.Thread(target=self._run_worker, daemon=True).start()
 
-    def _run_worker(self):
-        def progress_cb(current, total, filename):
-            self.root.after(0, self._update_progress, current, total, filename)
+    def _on_progress_callback(self, payload: dict):
+        self.msg_queue.put(("progress", payload))
 
-        def result_cb(result):
-            self.root.after(0, self._append_result, result)
+    def _process_queue(self):
+        while not self.msg_queue.empty():
+            try:
+                msg_type, data = self.msg_queue.get_nowait()
+                if msg_type == "progress":
+                    self._update_ui_progress(data)
+                elif msg_type == "finished":
+                    self._extraction_finished(data)
+                elif msg_type == "error":
+                    self._extraction_error(data)
+            except queue.Empty:
+                break
 
-        final_res = self.processor.process_all(
-            progress_callback=progress_cb,
-            result_callback=result_cb
-        )
+        if self.is_processing:
+            self.root.after(40, self._process_queue)
 
-        self.root.after(0, self._extraction_finished, final_res)
-
-    def _update_progress(self, current, total, filename):
+    def _update_ui_progress(self, payload: dict):
+        current = payload.get("current_index", 0)
+        total = payload.get("total_files", 0)
+        filename = payload.get("current_filename", "")
         self.progress_bar["value"] = current
         self.status_label.config(text=f"Processing ({current}/{total}): {filename[:30]}...")
 
-    def _append_result(self, result):
-        emails_str = "; ".join(result["emails"]) if result["emails"] else "—"
-        # Phone numbers: format without parentheses as requested
-        phones_str = "; ".join(
-            p.get("formatted_display") or p.get("raw") for p in result["phones"]
-        ) if result["phones"] else "—"
+        # Update metrics live
+        self.metric_files.config(text=f"Files Processed: {current}/{total}")
+        self.metric_emails.config(text=f"Unique Emails: {payload.get('unique_emails_count', 0)}")
+        self.metric_phones.config(text=f"Unique Phones: {payload.get('unique_phones_count', 0)}")
 
-        self.tree.insert("", tk.END, values=(result["filename"], emails_str, phones_str))
+        # Append last processed resume to table
+        last_res = payload.get("last_result")
+        if last_res:
+            emails_str = "; ".join(last_res.get("emails", [])) if last_res.get("emails") else "—"
+            phones_list = last_res.get("phones", [])
+            phones_str = "; ".join(phones_list) if phones_list else "—"
+            self.tree.insert("", tk.END, values=(last_res.get("filename", ""), emails_str, phones_str))
+            children = self.tree.get_children()
+            if children:
+                self.tree.see(children[-1])
+
+    def _run_worker(self):
+        try:
+            final_res = self.processor.process()
+            self.msg_queue.put(("finished", final_res))
+        except Exception as e:
+            self.msg_queue.put(("error", str(e)))
+
+    def _extraction_error(self, err_msg: str):
+        self.is_processing = False
+        self.start_btn.config(state=tk.NORMAL)
+        self.stop_btn.config(state=tk.DISABLED)
+        self.status_label.config(text="❌ Error occurred during extraction.")
+        messagebox.showerror("Extraction Error", f"An error occurred during extraction:\n{err_msg}")
 
     def _extraction_finished(self, final_res):
         self.result_data = final_res
@@ -261,9 +299,10 @@ class LightweightExtractorApp:
         self.start_btn.config(state=tk.NORMAL)
         self.stop_btn.config(state=tk.DISABLED)
 
-        emails_count = len(final_res["unique_emails_df"])
-        phones_count = len(final_res["unique_phones_df"])
-        total_files = final_res["processed_count"]
+        summary = final_res.get("summary", {})
+        emails_count = len(final_res.get("df_unique_emails", []))
+        phones_count = len(final_res.get("df_unique_phones", []))
+        total_files = summary.get("processed_count", len(final_res.get("resume_results", [])))
 
         self.metric_files.config(text=f"Files Processed: {total_files}")
         self.metric_emails.config(text=f"Unique Emails: {emails_count}")
@@ -288,9 +327,9 @@ class LightweightExtractorApp:
         )
 
     def _stop_extraction(self):
-        if self.processor and self.is_processing:
-            self.processor.cancel()
-            self.status_label.config(text="Stopping process...")
+        if self.stop_event and self.is_processing:
+            self.stop_event.set()
+            self.status_label.config(text="Stopping process gracefully...")
 
     def _export_excel(self):
         if not self.result_data:
@@ -304,11 +343,11 @@ class LightweightExtractorApp:
         if save_path:
             try:
                 wb_io = ExportManager.generate_full_report_workbook(
-                    df_unique=self.result_data["unique_emails_df"],
-                    df_mapping=self.result_data["resume_mapping_df"],
+                    df_unique=self.result_data["df_unique_emails"],
+                    df_mapping=self.result_data["df_resume_mapping"],
                     summary=self.result_data["summary"],
                     resume_results=self.result_data["resume_results"],
-                    df_unique_phones=self.result_data.get("unique_phones_df")
+                    df_unique_phones=self.result_data.get("df_unique_phones")
                 )
                 with open(save_path, "wb") as f:
                     f.write(wb_io.getbuffer())
@@ -327,7 +366,7 @@ class LightweightExtractorApp:
         )
         if save_path:
             try:
-                csv_bytes = ExportManager.generate_csv_bytes(self.result_data["unique_emails_df"])
+                csv_bytes = ExportManager.generate_csv_bytes(self.result_data["df_unique_emails"])
                 with open(save_path, "wb") as f:
                     f.write(csv_bytes)
                 messagebox.showinfo("Export Successful", f"CSV file saved successfully to:\n{save_path}")
@@ -337,7 +376,8 @@ class LightweightExtractorApp:
     def _copy_bcc(self, separator: str):
         if not self.result_data:
             return
-        emails = self.result_data["unique_emails_df"]["Email Address"].dropna().tolist()
+        df_emails = self.result_data.get("df_unique_emails")
+        emails = df_emails["Email Address"].dropna().tolist() if df_emails is not None and "Email Address" in df_emails.columns else []
         if not emails:
             messagebox.showinfo("No Emails", "No email addresses found to copy.")
             return
