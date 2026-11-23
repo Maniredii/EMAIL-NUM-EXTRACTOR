@@ -5,6 +5,8 @@ Bulk email extraction from local resume folders with zero cloud upload.
 import os
 import sys
 import time
+import zipfile
+import tempfile
 import threading
 from pathlib import Path
 import streamlit as st
@@ -125,30 +127,69 @@ with st.sidebar:
     )
 
 
-# Section 1: Folder Selection Panel
-st.markdown("### 1. Select Local Resume Folder")
+# Section 1: Folder Selection / Upload Panel
+st.markdown("### 1. Select Resume Source")
 
-col_input, col_browse, col_scan = st.columns([5, 1.2, 1.2], gap="small")
+source_tab1, source_tab2 = st.tabs([
+    "📁 Local Folder Path (Windows / Desktop)",
+    "☁️ Upload Resumes (.zip or multiple PDFs)"
+])
 
-with col_input:
-    current_path = st.text_input(
-        "Resume Folder Path",
-        value=st.session_state.folder_path,
-        placeholder=r"e.g. D:\HR\Resumes or C:\Users\User\Desktop\Resumes",
-        label_visibility="collapsed"
+with source_tab1:
+    col_input, col_browse, col_scan = st.columns([5, 1.2, 1.2], gap="small")
+
+    with col_input:
+        current_path = st.text_input(
+            "Resume Folder Path",
+            value=st.session_state.folder_path,
+            placeholder=r"e.g. D:\HR\Resumes or C:\Users\User\Desktop\Resumes or Sample_Resumes",
+            label_visibility="collapsed"
+        )
+        if current_path != st.session_state.folder_path:
+            st.session_state.folder_path = current_path
+
+    with col_browse:
+        if st.button("📁 Browse...", use_container_width=True, help="Open native Windows folder picker (Local desktop only)"):
+            picked_dir = open_native_folder_dialog(st.session_state.folder_path)
+            if picked_dir:
+                st.session_state.folder_path = picked_dir
+                st.rerun()
+
+    with col_scan:
+        scan_clicked = st.button("🔎 Scan Folder", type="primary", use_container_width=True)
+
+    # Quick shortcut for sample resumes
+    if os.path.isdir("Sample_Resumes"):
+        col_sample, _ = st.columns([2.5, 4])
+        with col_sample:
+            if st.button("✨ Quick Test: Load Included Sample Resumes", use_container_width=True):
+                st.session_state.folder_path = str(Path("Sample_Resumes").resolve())
+                scan_clicked = True
+
+with source_tab2:
+    st.caption("Upload a `.zip` archive containing resumes or select multiple PDF/DOCX files directly. Ideal when using Streamlit Cloud.")
+    uploaded_files = st.file_uploader(
+        "Choose PDF / DOCX resumes or a .ZIP archive",
+        type=["pdf", "docx", "txt", "zip"],
+        accept_multiple_files=True
     )
-    if current_path != st.session_state.folder_path:
-        st.session_state.folder_path = current_path
+    if uploaded_files:
+        if st.button("📦 Unpack & Scan Uploaded Resumes", type="primary"):
+            temp_upload_dir = tempfile.mkdtemp(prefix="uploaded_resumes_")
+            for uf in uploaded_files:
+                if uf.name.lower().endswith(".zip"):
+                    try:
+                        with zipfile.ZipFile(uf) as zf:
+                            zf.extractall(temp_upload_dir)
+                    except Exception as ze:
+                        st.error(f"Error unzipping {uf.name}: {ze}")
+                else:
+                    save_path = os.path.join(temp_upload_dir, uf.name)
+                    with open(save_path, "wb") as f:
+                        f.write(uf.getbuffer())
 
-with col_browse:
-    if st.button("📁 Browse...", use_container_width=True, help="Open native Windows folder picker"):
-        picked_dir = open_native_folder_dialog(st.session_state.folder_path)
-        if picked_dir:
-            st.session_state.folder_path = picked_dir
-            st.rerun()
-
-with col_scan:
-    scan_clicked = st.button("🔎 Scan Folder", type="primary", use_container_width=True)
+            st.session_state.folder_path = temp_upload_dir
+            scan_clicked = True
 
 # Scan Execution Trigger
 if scan_clicked:

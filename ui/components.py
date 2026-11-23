@@ -14,6 +14,9 @@ def open_native_folder_dialog(initial_dir: Optional[str] = None) -> str:
     Spawns a native Windows folder picker using Tkinter in a separate isolated process.
     This guarantees non-blocking execution and eliminates Tkinter thread conflicts in Streamlit.
     """
+    if sys.platform != "win32":
+        return ""
+
     initial_clean = ""
     if initial_dir and os.path.isdir(initial_dir):
         initial_clean = os.path.normpath(initial_dir).replace('\\', '\\\\')
